@@ -8,7 +8,7 @@
 #include <iostream>
 #include <string>
 
-std::string TrespasserDetection() {
+std::string TrespasserDetection(int MAXRUNTIME) {
 	std::string errorMessage = "";
 	uint32_t kinectCount = k4a_device_get_installed_count();
 
@@ -39,7 +39,42 @@ std::string TrespasserDetection() {
 			k4a_device_close(device);
 		}
 
+		//Process Kinect recording data
+		int runTime = 0;
+		bool running = true;
+		while (running && errorMessage == "" && runTime < MAXRUNTIME) {
+			//Increment frame counter, MAXRUNTIME/fps = run time in seconds
+			runTime++;
 
+			//Press spacebar to stop recording
+			if (GetAsyncKeyState(VK_SPACE)) {
+				running = false;
+			}
+
+			//Get current frame
+			k4a_capture_t sensor_capture;
+			k4a_wait_result_t get_capture_result = k4a_device_get_capture(device, &sensor_capture, K4A_WAIT_INFINITE);
+
+			//Process current frame
+			if (get_capture_result == K4A_WAIT_RESULT_SUCCEEDED) {
+				k4a_wait_result_t queue_capture_result = k4abt_tracker_enqueue_capture(tracker, sensor_capture, K4A_WAIT_INFINITE);
+				k4a_capture_release(sensor_capture);
+				if (queue_capture_result == K4A_WAIT_RESULT_FAILED) {
+					errorMessage += ("Add capture to tracker process queue failed.\n");
+				}
+
+
+			}
+			else {
+				errorMessage += "Get depth capture returned error.\n";
+			}
+		}
+
+		//Stop Kinect and release tracker
+		k4abt_tracker_shutdown(tracker);
+		k4abt_tracker_destroy(tracker);
+		k4a_device_stop_cameras(device);
+		k4a_device_close(device);
 	}
 	else if (kinectCount == 0) { //End program if Kinect isn't found
 		errorMessage += "Kinect can't be found by program, please try reconnecting.\n";
