@@ -1,0 +1,1 @@
+//Class to detect faces in an image
