@@ -1,30 +1,20 @@
 #pragma once
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+
 #include <k4a/k4a.h>
 #include <k4arecord/record.h>
 #include <k4arecord/playback.h>
 #include <k4abt.h>
 
-#include "windows.h"
+#include "stb_image_write.h"
 
 #include <iostream>
 #include <string>
 
+#include "windows.h"
 #include "assert.h"
 #include <fstream>
-
-void writeToFile(const char* fileName, void* buffer, size_t bufferSize) {
-	assert(buffer != NULL);
-
-	std::ofstream hFile;
-	hFile.open(fileName, std::ios::out | std::ios::trunc | std::ios::binary);
-	if (hFile.is_open())
-	{
-		hFile.write((char*)buffer, static_cast<std::streamsize>(bufferSize));
-		hFile.close();
-	}
-	std::cout << "[Streaming Service] frame is stored in " << fileName << std::endl;
-}
 
 std::string TrespasserDetection(int MAXRUNTIME) {
 	std::string errorMessage = "";
@@ -39,8 +29,8 @@ std::string TrespasserDetection(int MAXRUNTIME) {
 
 		//Initialize the Kinect
 		k4a_device_configuration_t device_config = K4A_DEVICE_CONFIG_INIT_DISABLE_ALL;
-		device_config.camera_fps = K4A_FRAMES_PER_SECOND_15;
-		device_config.color_format = K4A_IMAGE_FORMAT_COLOR_MJPG;
+		device_config.camera_fps = K4A_FRAMES_PER_SECOND_5;
+		device_config.color_format = K4A_IMAGE_FORMAT_COLOR_BGRA32;
 		device_config.color_resolution = K4A_COLOR_RESOLUTION_720P;
 		device_config.depth_mode = K4A_DEPTH_MODE_WFOV_UNBINNED;
 		device_config.synchronized_images_only = true;
@@ -99,10 +89,14 @@ std::string TrespasserDetection(int MAXRUNTIME) {
 				k4a_wait_result_t pop_frame_result = k4abt_tracker_pop_result(tracker, &body_frame, K4A_WAIT_INFINITE);
 				if (pop_frame_result == K4A_WAIT_RESULT_SUCCEEDED && errorMessage == "") {
 					uint32_t num_bodies = k4abt_frame_get_num_bodies(body_frame);
-					for (int i = 0; i < num_bodies; i++) {
+					uint8_t* originalBuffer = k4a_image_get_buffer(color_image);
+					int stride = k4a_image_get_stride_bytes(color_image);
+					int width = k4a_image_get_width_pixels(color_image);
+					int height = k4a_image_get_height_pixels(color_image);
+					for (int i = 0; i<num_bodies; i++) {
 						k4a_float2_t joints2D[32] = {};
 						k4abt_skeleton_t skeleton;
-						k4abt_frame_get_body_skeleton(body_frame, 0, &skeleton);
+						k4abt_frame_get_body_skeleton(body_frame, i, &skeleton);
 						int jointCount = 0;
 						int valid = 0;
 
@@ -128,34 +122,62 @@ std::string TrespasserDetection(int MAXRUNTIME) {
 									yMax = point.xy.y;
 								}
 							}
-							int width = k4a_image_get_width_pixels(color_image);
-							int bufferSize = (xMax - xMin + 1) * (yMax - yMin + 1);
+
+							int personWidth = xMax - xMin;
+							int personHeight = yMax - yMin;
+							xMin = xMin - int(personWidth / 4);
+							xMax = xMax + int(personWidth / 4);
+							yMin = yMin - int(personHeight / 4);
+							yMax = yMax + int(personHeight / 4);
+							personWidth = xMax - xMin;
+							personHeight = yMax - yMin;
+							if (xMin < 0) {
+								xMin = 0;
+							}
+							if (xMax > 1280) {
+								xMax = 1280;
+							}
+							if (yMin < 0) {
+								yMin = 0;
+							}
+							if (yMax > 720) {
+								yMax = 720;
+							}
+
+							int calcHeight = skeleton.joints[24].position.xyz.y - skeleton.joints[30].position.xyz.y;
+							int bufferSize = personWidth * personHeight * 3;
 							int bufferCount = 0;
-							uint8_t* originalBuffer = k4a_image_get_buffer(color_image);
+							
 							uint8_t* imageBuffer = new uint8_t[bufferSize];
-							for (int y = yMin; y <= yMax; y++) {
-								for (int x = xMin; x <= xMax; x++) {
-									imageBuffer[bufferCount] = originalBuffer[y*width + x];
-									bufferCount++;
+							for (int y = yMin; y < yMax; y++) {
+								for (int x = xMin; x < xMax; x++) {
+									imageBuffer[bufferCount] = originalBuffer[y*stride + x*4];
+									imageBuffer[bufferCount+1] = originalBuffer[y*stride + x*4 + 1];
+									imageBuffer[bufferCount+2] = originalBuffer[y*stride + x*4 + 2];
+									bufferCount+=3;
 								}
 							}
 
+							std::string personTextFileName = "person" + std::to_string(i) + "Image" + std::to_string(runTime) + ".txt";
+							std::ofstream fw(personTextFileName, std::ofstream::out);
+							fw << calcHeight << "\n";
+							fw.close();
+
 							std::string personFileName = "person" + std::to_string(i) + "Image" + std::to_string(runTime) + ".jpg";
-							writeToFile(personFileName.c_str(), imageBuffer, bufferSize);
+							int result = stbi_write_jpg(personFileName.c_str(), xMax-xMin, yMax-yMin, 3, imageBuffer, 90);
 
 							delete[] imageBuffer;
 						}
 					}
 					std::string colorFileName = "colorImage" + std::to_string(runTime) + ".jpg";
-					writeToFile(colorFileName.c_str(), k4a_image_get_buffer(color_image), k4a_image_get_size(color_image));
+					int result = stbi_write_jpg(colorFileName.c_str(), width, height, 4, originalBuffer, 90);
 
-					k4abt_frame_release(body_frame);
-					k4a_image_release(color_image);
-					k4a_capture_release(sensor_capture);
+					k4abt_frame_release(body_frame);			
 				}
 				else {
 					errorMessage += "Pop body frame result failed.\n";
 				}
+				k4a_image_release(color_image);
 			}
 			else {
 				errorMessage += "Get depth capture returned error.\n";
