@@ -143,8 +143,8 @@ std::string TrespasserDetection(int MAXRUNTIME) {
 							if (yMax > 720) {
 								yMax = 720;
 							}
-
-							int calcHeight = skeleton.joints[24].position.xyz.y - skeleton.joints[30].position.xyz.y;
+							// 250 added to compensate for skeleton measuring ankle to nose
+							int calcHeight = skeleton.joints[24].position.xyz.y - skeleton.joints[30].position.xyz.y + 250;
 							int bufferSize = personWidth * personHeight * 3;
 							int bufferCount = 0;
 							
